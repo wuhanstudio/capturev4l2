@@ -31,8 +31,8 @@ int print_caps(int fd)
     struct v4l2_capability caps = {};
     if (-1 == xioctl(fd, VIDIOC_QUERYCAP, &caps))
     {
-            perror("Querying Capabilities");
-            return 1;
+        perror("Querying Capabilities");
+        return 1;
     }
 
     printf( "Driver Caps:\n"
@@ -52,8 +52,8 @@ int print_caps(int fd)
     cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (-1 == xioctl (fd, VIDIOC_CROPCAP, &cropcap))
     {
-            perror("Querying Cropping Capabilities");
-            return 1;
+        perror("Querying Cropping Capabilities");
+        return 1;
     }
 
     printf( "Camera Cropping:\n"
@@ -73,13 +73,13 @@ int print_caps(int fd)
     printf("  FMT : CE Desc\n--------------------\n");
     while (0 == xioctl(fd, VIDIOC_ENUM_FMT, &fmtdesc))
     {
-            strncpy(fourcc, (char *)&fmtdesc.pixelformat, 4);
-            if (fmtdesc.pixelformat == V4L2_PIX_FMT_SGRBG10)
-                support_grbg10 = 1;
-            c = fmtdesc.flags & 1? 'C' : ' ';
-            e = fmtdesc.flags & 2? 'E' : ' ';
-            printf("  %s: %c%c %s\n", fourcc, c, e, fmtdesc.description);
-            fmtdesc.index++;
+        strncpy(fourcc, (char *)&fmtdesc.pixelformat, 4);
+        if (fmtdesc.pixelformat == V4L2_PIX_FMT_SGRBG10)
+            support_grbg10 = 1;
+        c = fmtdesc.flags & 1? 'C' : ' ';
+        e = fmtdesc.flags & 2? 'E' : ' ';
+        printf("  %s: %c%c %s\n", fourcc, c, e, fmtdesc.description);
+        fmtdesc.index++;
     }
     /*
     if (!support_grbg10)
@@ -193,27 +193,41 @@ int capture_image(int fd)
     return 0;
 }
  
-int main()
+int main(int argc, char* argv[])
 {
     int fd;
 
-    fd = open("/dev/video0", O_RDWR);
+    if(argc < 2)
+    {
+        printf("Usage: %s /dev/videox\n", argv[0]);
+        return 1;
+    }
+
+    fd = open(argv[1], O_RDWR);
     if (fd == -1)
     {
-            perror("Opening video device");
-            return 1;
-    }
-    if(print_caps(fd))
+        perror("Opening video device");
         return 1;
+    }
+
+    if(print_caps(fd))
+    {
+        return 1;
+    }
     
     if(init_mmap(fd))
-        return 1;
-    int i;
-    for(i=0; i<5; i++)
     {
-        if(capture_image(fd))
+        return 1;
+    }
+
+    for(int i=0; i<5; i++)
+    {
+        if(capture_image(fd)) 
+        {
             return 1;
+        }
     }
     close(fd);
+
     return 0;
 }
