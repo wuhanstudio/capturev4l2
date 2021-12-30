@@ -6,6 +6,6 @@ This program captures an image from the Linux video device (/dev/video0), and co
 $ sudo apt install libopencv-dev
 $ git clone https://github.com.wuhanstudio/capturev4l2 && cd capturev4l2
 $ make
-$ ./capturev4l2
+$ ./capturev4l2 /dev/video0
 ```
 
