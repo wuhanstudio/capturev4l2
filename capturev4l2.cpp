@@ -10,6 +10,7 @@
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 
 #define IMAGE_WIDTH 1280
 #define IMAGE_HEIGHT 720
@@ -20,7 +21,10 @@ static int xioctl(int fd, int request, void *arg)
 {
     int r;
 
-    do r = ioctl (fd, request, arg);
+    do 
+    {
+        r = ioctl(fd, request, arg);
+    }
     while (-1 == r && EINTR == errno);
 
     return r;
@@ -48,21 +52,21 @@ int print_caps(int fd)
             (caps.version>>24)&&0xff,
             caps.capabilities);
 
-    struct v4l2_cropcap cropcap = {0};
-    cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (-1 == xioctl (fd, VIDIOC_CROPCAP, &cropcap))
-    {
-        perror("Querying Cropping Capabilities");
-        return 1;
-    }
+    // struct v4l2_cropcap cropcap = {0};
+    // cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    // if (-1 == xioctl (fd, VIDIOC_CROPCAP, &cropcap))
+    // {
+    //     perror("Querying Cropping Capabilities");
+    //     return 1;
+    // }
 
-    printf( "Camera Cropping:\n"
-            "  Bounds: %dx%d+%d+%d\n"
-            "  Default: %dx%d+%d+%d\n"
-            "  Aspect: %d/%d\n",
-            cropcap.bounds.width, cropcap.bounds.height, cropcap.bounds.left, cropcap.bounds.top,
-            cropcap.defrect.width, cropcap.defrect.height, cropcap.defrect.left, cropcap.defrect.top,
-            cropcap.pixelaspect.numerator, cropcap.pixelaspect.denominator);
+    // printf( "Camera Cropping:\n"
+    //         "  Bounds: %dx%d+%d+%d\n"
+    //         "  Default: %dx%d+%d+%d\n"
+    //         "  Aspect: %d/%d\n",
+    //         cropcap.bounds.width, cropcap.bounds.height, cropcap.bounds.left, cropcap.bounds.top,
+    //         cropcap.defrect.width, cropcap.defrect.height, cropcap.defrect.left, cropcap.defrect.top,
+    //         cropcap.pixelaspect.numerator, cropcap.pixelaspect.denominator);
 
     int support_grbg10 = 0;
 
@@ -81,6 +85,7 @@ int print_caps(int fd)
         printf("  %s: %c%c %s\n", fourcc, c, e, fmtdesc.description);
         fmtdesc.index++;
     }
+
     /*
     if (!support_grbg10)
     {
@@ -92,9 +97,12 @@ int print_caps(int fd)
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     fmt.fmt.pix.width = IMAGE_WIDTH;
     fmt.fmt.pix.height = IMAGE_HEIGHT;
-    //fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_BGR24;
-    //fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_GREY;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+
+    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB24;
+    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_GREY;
+    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     
     if (-1 == xioctl(fd, VIDIOC_S_FMT, &fmt))
@@ -142,7 +150,12 @@ int init_mmap(int fd)
     buffer = mmap (NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
     printf("Length: %d\nAddress: %p\n", buf.length, buffer);
     printf("Image Length: %d\n", buf.bytesused);
- 
+    
+    if(buf.bytesused <= 0) 
+    {
+        perror("Image Length 0");
+        return 1;
+    }
     return 0;
 }
  
@@ -181,13 +194,22 @@ int capture_image(int fd)
         perror("Retrieving Frame");
         return 1;
     }
-    printf ("saving image\n");
+    printf ("Saving Image\n");
     
-    cv::_InputArray pic_arr(buffer, IMAGE_WIDTH * IMAGE_HEIGHT * 3);
-    cv::Mat out_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
+    // Decode MJPEG
+    // cv::_InputArray pic_arr(buffer, IMAGE_WIDTH * IMAGE_HEIGHT * 3);
+    // cv::Mat out_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
 
+    // Decode YUYV
+    cv::Mat img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC2, buffer);
+    cv::Mat out_img;
+    cv::cvtColor(img, out_img, cv::COLOR_YUV2RGB_YVYU);
+
+    // Decode RGB3
+    // cv::Mat out_img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC3, buffer);
+
+    imwrite("output.jpg", out_img);
     imshow("view", out_img);
-    imwrite("output.jpg",out_img);
     cv::waitKey(0);
 
     return 0;
