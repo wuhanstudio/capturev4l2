@@ -91,7 +91,8 @@ int print_caps(int fd)
     {
         printf("Doesn't support GRBG10.\n");
         return 1;
-    }*/
+    }
+    */
 
     struct v4l2_format fmt = {0};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -100,8 +101,8 @@ int print_caps(int fd)
 
     // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB24;
     // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_GREY;
-    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
 
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     
@@ -151,11 +152,6 @@ int init_mmap(int fd)
     printf("Length: %d\nAddress: %p\n", buf.length, buffer);
     printf("Image Length: %d\n", buf.bytesused);
     
-    if(buf.bytesused <= 0) 
-    {
-        perror("Image Length 0");
-        return 1;
-    }
     return 0;
 }
  
@@ -197,19 +193,19 @@ int capture_image(int fd)
     printf ("Saving Image\n");
     
     // Decode MJPEG
-    // cv::_InputArray pic_arr(buffer, IMAGE_WIDTH * IMAGE_HEIGHT * 3);
-    // cv::Mat out_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
+    cv::_InputArray pic_arr(buffer, IMAGE_WIDTH * IMAGE_HEIGHT * 3);
+    cv::Mat out_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
 
     // Decode YUYV
-    cv::Mat img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC2, buffer);
-    cv::Mat out_img;
-    cv::cvtColor(img, out_img, cv::COLOR_YUV2RGB_YVYU);
+    // cv::Mat img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC2, buffer);
+    // cv::Mat out_img;
+    // cv::cvtColor(img, out_img, cv::COLOR_YUV2RGB_YVYU);
 
     // Decode RGB3
     // cv::Mat out_img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC3, buffer);
 
-    imwrite("output.jpg", out_img);
     imshow("view", out_img);
+    imwrite("output.jpg", out_img);
     cv::waitKey(0);
 
     return 0;
