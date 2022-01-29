@@ -12,11 +12,76 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
-#define IMAGE_WIDTH 1280
-#define IMAGE_HEIGHT 720
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cstdint>
+#include <memory>
+
+#include <jpeglib.h>
+
+#define IMAGE_WIDTH 640
+#define IMAGE_HEIGHT 360
 
 uint8_t *buffer;
  
+/**
+ * converts a YUYV raw buffer to a JPEG buffer.
+ * input is in YUYV (YUV 422). output is JPEG binary.
+ * from https://linuxtv.org/downloads/v4l-dvb-apis/V4L2-PIX-FMT-YUYV.html:
+ *      Each four bytes is two pixels.
+ *      Each four bytes is two Y's, a Cb and a Cr.
+ *      Each Y goes to one of the pixels, and the Cb and Cr belong to both pixels.
+ *
+ * inspired by: http://stackoverflow.com/questions/17029136/weird-image-while-trying-to-compress-yuv-image-to-jpeg-using-libjpeg
+ */
+uint64_t compressYUYVtoJPEG(const uint8_t* input, const int width, const int height, uint8_t* &outbuffer) {
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    JSAMPROW row_ptr[1];
+    int row_stride;
+
+    // uint8_t* outbuffer = NULL;
+    uint64_t outlen = 0;
+
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+    jpeg_mem_dest(&cinfo, &outbuffer, &outlen);
+
+    // jrow is a libjpeg row of samples array of 1 row pointer
+    cinfo.image_width = width & -1;
+    cinfo.image_height = height & -1;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = JCS_YCbCr; //libJPEG expects YUV 3bytes, 24bit, YUYV --> YUV YUV YUV
+
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, 92, TRUE);
+    jpeg_start_compress(&cinfo, TRUE);
+
+    std::vector<uint8_t> tmprowbuf(width * 3);
+
+    JSAMPROW row_pointer[1];
+    row_pointer[0] = &tmprowbuf[0];
+    while (cinfo.next_scanline < cinfo.image_height) {
+        unsigned i, j;
+        unsigned offset = cinfo.next_scanline * cinfo.image_width * 2; //offset to the correct row
+        for (i = 0, j = 0; i < cinfo.image_width * 2; i += 4, j += 6) { //input strides by 4 bytes, output strides by 6 (2 pixels)
+            tmprowbuf[j + 0] = input[offset + i + 0]; // Y (unique to this pixel)
+            tmprowbuf[j + 1] = input[offset + i + 1]; // U (shared between pixels)
+            tmprowbuf[j + 2] = input[offset + i + 3]; // V (shared between pixels)
+            tmprowbuf[j + 3] = input[offset + i + 2]; // Y (unique to this pixel)
+            tmprowbuf[j + 4] = input[offset + i + 1]; // U (shared between pixels)
+            tmprowbuf[j + 5] = input[offset + i + 3]; // V (shared between pixels)
+        }
+        jpeg_write_scanlines(&cinfo, row_pointer, 1);
+    }
+
+    jpeg_finish_compress(&cinfo);
+    jpeg_destroy_compress(&cinfo);
+
+    return outlen;
+}
+
 static int xioctl(int fd, int request, void *arg)
 {
     int r;
@@ -101,8 +166,8 @@ int print_caps(int fd)
 
     // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB24;
     // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_GREY;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
 
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     
@@ -190,23 +255,45 @@ int capture_image(int fd)
         perror("Retrieving Frame");
         return 1;
     }
-    printf ("Saving Image\n");
+    // printf ("Saving Image\n");
     
     // Decode MJPEG
-    cv::_InputArray pic_arr(buffer, IMAGE_WIDTH * IMAGE_HEIGHT * 3);
-    cv::Mat out_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
+    // cv::_InputArray pic_arr(buffer, IMAGE_WIDTH * IMAGE_HEIGHT * 3);
+    // cv::Mat out_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
 
     // Decode YUYV
-    // cv::Mat img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC2, buffer);
-    // cv::Mat out_img;
-    // cv::cvtColor(img, out_img, cv::COLOR_YUV2RGB_YVYU);
+    cv::Mat img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC2, buffer);
+    cv::Mat out_img;
+    cv::cvtColor(img, out_img, cv::COLOR_YUV2RGB_YVYU);
 
     // Decode RGB3
     // cv::Mat out_img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC3, buffer);
 
     imshow("view", out_img);
-    imwrite("output.jpg", out_img);
-    cv::waitKey(0);
+    // imwrite("output.jpg", out_img);
+
+
+    // RGB to YUV
+    // cv::cvtColor(out_img, img, cv::COLOR_RGB2YUV);
+
+    // YUV to YUYV
+
+
+    // YUYV to JPEG
+    uint8_t* outbuffer = NULL;
+    cv::Mat input = img.reshape(1, img.total()*img.channels());
+    std::vector<uint8_t> vec = img.isContinuous()? input : input.clone();
+    uint64_t outlen = compressYUYVtoJPEG(vec.data(), IMAGE_WIDTH, IMAGE_HEIGHT, outbuffer);
+
+    printf("libjpeg produced %ld bytes\n", outlen);
+
+    // Write JPEG to file 
+    std::vector<uint8_t> output = std::vector<uint8_t>(outbuffer, outbuffer + outlen);
+    std::ofstream ofs("output.jpg", std::ios_base::binary);
+    ofs.write((const char*) &output[0], output.size());
+    ofs.close();
+
+    cv::waitKey(1);
 
     return 0;
 }
@@ -238,7 +325,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    for(int i=0; i<5; i++)
+    for(; ; )
     {
         if(capture_image(fd)) 
         {
