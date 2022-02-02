@@ -1,3 +1,4 @@
 *.o
 *.jpg
 capturev4l2
+.vscode/

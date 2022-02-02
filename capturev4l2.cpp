@@ -20,8 +20,14 @@
 
 #include <jpeglib.h>
 
-#define IMAGE_WIDTH 640
-#define IMAGE_HEIGHT 360
+#define IMAGE_WIDTH_720P    1280
+#define IMAGE_HEIGHT_720P   720
+
+#define IMAGE_WIDTH_360P    640
+#define IMAGE_HEIGHT_360P   360
+
+int image_width = IMAGE_WIDTH_360P;
+int image_height = IMAGE_HEIGHT_360P;
 
 uint8_t *buffer;
  
@@ -35,7 +41,7 @@ uint8_t *buffer;
  *
  * inspired by: http://stackoverflow.com/questions/17029136/weird-image-while-trying-to-compress-yuv-image-to-jpeg-using-libjpeg
  */
-uint64_t compressYUYVtoJPEG(const uint8_t* input, const int width, const int height, uint8_t* &outbuffer) {
+uint64_t YUYVtoJPEG(const uint8_t* input, const int width, const int height, uint8_t* &outbuffer) {
     struct jpeg_compress_struct cinfo;
     struct jpeg_error_mgr jerr;
     JSAMPROW row_ptr[1];
@@ -82,7 +88,7 @@ uint64_t compressYUYVtoJPEG(const uint8_t* input, const int width, const int hei
     return outlen;
 }
 
-uint64_t compressYV12toJPEG(const uint8_t* input, const int width, const int height, uint8_t* &outbuffer) {
+uint64_t YV12toJPEG(const uint8_t* input, const int width, const int height, uint8_t* &outbuffer) {
     struct jpeg_compress_struct cinfo;
     struct jpeg_error_mgr jerr;
     JSAMPROW row_ptr[1];
@@ -138,7 +144,7 @@ static int xioctl(int fd, int request, void *arg)
     return r;
 }
  
-int print_caps(int fd)
+int print_caps(int fd, int pixel_format)
 {
     struct v4l2_capability caps = {};
     if (-1 == xioctl(fd, VIDIOC_QUERYCAP, &caps))
@@ -160,22 +166,6 @@ int print_caps(int fd)
             (caps.version>>24)&&0xff,
             caps.capabilities);
 
-    // struct v4l2_cropcap cropcap = {0};
-    // cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    // if (-1 == xioctl (fd, VIDIOC_CROPCAP, &cropcap))
-    // {
-    //     perror("Querying Cropping Capabilities");
-    //     return 1;
-    // }
-
-    // printf( "Camera Cropping:\n"
-    //         "  Bounds: %dx%d+%d+%d\n"
-    //         "  Default: %dx%d+%d+%d\n"
-    //         "  Aspect: %d/%d\n",
-    //         cropcap.bounds.width, cropcap.bounds.height, cropcap.bounds.left, cropcap.bounds.top,
-    //         cropcap.defrect.width, cropcap.defrect.height, cropcap.defrect.left, cropcap.defrect.top,
-    //         cropcap.pixelaspect.numerator, cropcap.pixelaspect.denominator);
-
     int support_grbg10 = 0;
 
     struct v4l2_fmtdesc fmtdesc = {0};
@@ -194,23 +184,14 @@ int print_caps(int fd)
         fmtdesc.index++;
     }
 
-    /*
-    if (!support_grbg10)
-    {
-        printf("Doesn't support GRBG10.\n");
-        return 1;
-    }
-    */
-
     struct v4l2_format fmt = {0};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = IMAGE_WIDTH;
-    fmt.fmt.pix.height = IMAGE_HEIGHT;
+    fmt.fmt.pix.width = image_width;
+    fmt.fmt.pix.height = image_height;
 
-    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB24;
-    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_GREY;
-    // fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+    if(pixel_format == 0) fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+    if(pixel_format == 1) fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+    if(pixel_format == 2) fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB24;
 
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     
@@ -259,16 +240,17 @@ int init_mmap(int fd)
     buffer = mmap (NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
     printf("Length: %d\nAddress: %p\n", buf.length, buffer);
     printf("Image Length: %d\n", buf.bytesused);
-    
+
     return 0;
 }
  
-int capture_image(int fd)
+int capture_image(int fd, int format)
 {
     struct v4l2_buffer buf = {0};
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buf.memory = V4L2_MEMORY_MMAP;
     buf.index = 0;
+
     if(-1 == xioctl(fd, VIDIOC_QBUF, &buf))
     {
         perror("Query Buffer");
@@ -286,6 +268,7 @@ int capture_image(int fd)
     FD_SET(fd, &fds);
     struct timeval tv = {0};
     tv.tv_sec = 2;
+
     int r = select(fd+1, &fds, NULL, NULL, &tv);
     if(-1 == r)
     {
@@ -298,35 +281,45 @@ int capture_image(int fd)
         perror("Retrieving Frame");
         return 1;
     }
-    // printf ("Saving Image\n");
     
-    // Decode MJPEG
-    // cv::_InputArray pic_arr(buffer, IMAGE_WIDTH * IMAGE_HEIGHT * 3);
-    // cv::Mat out_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
+    cv::Mat cv_img;
 
-    // Decode YUYV
-    cv::Mat img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC2, buffer);
-    cv::Mat out_img;
-    cv::cvtColor(img, out_img, cv::COLOR_YUV2RGB_YVYU);
+    if (format == 0 ){
+        // Decode YUYV
+        cv::Mat img = cv::Mat(cv::Size(image_width, image_height), CV_8UC2, buffer);
+        cv::cvtColor(img, cv_img, cv::COLOR_YUV2RGB_YVYU);
+    }
 
-    // Decode RGB3
-    // cv::Mat out_img = cv::Mat(cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT), CV_8UC3, buffer);
+    if (format == 1) {
+        // Decode MJPEG
+        cv::_InputArray pic_arr(buffer, image_width * image_height * 3);
+        cv_img = cv::imdecode(pic_arr, cv::IMREAD_UNCHANGED);
+    }
 
-    imshow("view", out_img);
-    // imwrite("output.jpg", out_img);
+    if (format == 2) {
+        // Decode RGB3
+        cv_img = cv::Mat(cv::Size(image_width, image_height), CV_8UC3, buffer);
+    }
+
+    cv::imshow("view", cv_img);
 
     // You may do image processing here
+    // Begin OpenCV Code
+    // ..........
+    // End  OpenCV Code
+
+    cv::Mat raw_img;
 
     // RGB to YV12
-    cv::cvtColor(out_img, img, cv::COLOR_RGB2YUV_YV12);
+    cv::cvtColor(cv_img, raw_img, cv::COLOR_RGB2YUV_YV12);
 
     // YV12 to JPEG
     uint8_t* outbuffer = NULL;
-    cv::Mat input = img.reshape(1, img.total()*img.channels());
-    std::vector<uint8_t> vec = img.isContinuous()? input : input.clone();
-    uint64_t outlen = compressYV12toJPEG(vec.data(), IMAGE_WIDTH, IMAGE_HEIGHT, outbuffer);
+    cv::Mat input = raw_img.reshape(1, raw_img.total() * raw_img.channels());
+    std::vector<uint8_t> vec = raw_img.isContinuous()? input : input.clone();
+    uint64_t outlen = YV12toJPEG(vec.data(), image_width, image_height, outbuffer);
 
-    printf("libjpeg produced %ld bytes\n", outlen);
+    // printf("libjpeg produced %ld bytes\n", outlen);
 
     // Write JPEG to file 
     std::vector<uint8_t> output = std::vector<uint8_t>(outbuffer, outbuffer + outlen);
@@ -339,24 +332,80 @@ int capture_image(int fd)
     return 0;
 }
  
+static void usage(const char *argv0)
+{
+    fprintf(stderr, "Usage: %s [options]\n", argv0);
+    fprintf(stderr, "Available options are\n");
+    fprintf(stderr,
+            " -f <format>    Select frame format\n\t"
+            "0 = V4L2_PIX_FMT_YUYV\n\t"
+            "1 = V4L2_PIX_FMT_MJPEG\n\t"
+            "2 = V4L2_PIX_FMT_RGB24\n");
+    fprintf(stderr,
+            " -r <resolution> Select frame resolution:\n\t"
+            "0 = 360p, VGA (640x360)\n\t"
+            "1 = 720p, (1280x720)\n");
+    fprintf(stderr, " -v device V4L2 Video Capture device\n");
+    fprintf(stderr, " -h Print this help screen and exit\n");
+}
+
 int main(int argc, char* argv[])
 {
-    int fd;
+    int fd, opt;
 
-    if(argc < 2)
-    {
-        printf("Usage: %s /dev/videox\n", argv[0]);
-        return 1;
+    int pixel_format = 0;     /* V4L2_PIX_FMT_YUYV */
+    char *v4l2_devname = "/dev/video0";
+
+    while ((opt = getopt(argc, argv, "f:hv:r:")) != -1) {
+        switch (opt) {
+            case 'f':
+                if (atoi(optarg) < 0 || atoi(optarg) > 2) {
+                    usage(argv[0]);
+                    return 1;
+                }
+
+                pixel_format = atoi(optarg);
+                break;
+
+            case 'h':
+                usage(argv[0]);
+                return 1;
+            
+            case 'v':
+                v4l2_devname = optarg;
+                printf("Use video device: %s\n", v4l2_devname);
+                break;
+
+            case 'r':
+                if (atoi(optarg) < 0 || atoi(optarg) > 1) {
+                    usage(argv[0]);
+                    return 1;
+                }
+
+                if (atoi(optarg) == 0) {
+                    image_width = IMAGE_WIDTH_360P;
+                    image_height = IMAGE_HEIGHT_360P;
+                } else {
+                    image_width = IMAGE_WIDTH_720P;
+                    image_height = IMAGE_HEIGHT_720P;
+                }
+                break;
+
+            default:
+                printf("Invalid option '-%c'\n", opt);
+                usage(argv[0]);
+                return 1;
+        }
     }
 
-    fd = open(argv[1], O_RDWR);
+    fd = open(v4l2_devname, O_RDWR);
     if (fd == -1)
     {
         perror("Opening video device");
         return 1;
     }
 
-    if(print_caps(fd))
+    if(print_caps(fd, pixel_format))
     {
         return 1;
     }
@@ -368,7 +417,7 @@ int main(int argc, char* argv[])
 
     for(; ; )
     {
-        if(capture_image(fd)) 
+        if(capture_image(fd, pixel_format)) 
         {
             return 1;
         }
