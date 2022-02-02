@@ -322,10 +322,10 @@ int capture_image(int fd, int format)
     // printf("libjpeg produced %ld bytes\n", outlen);
 
     // Write JPEG to file 
-    // std::vector<uint8_t> output = std::vector<uint8_t>(outbuffer, outbuffer + outlen);
-    // std::ofstream ofs("output.jpg", std::ios_base::binary);
-    // ofs.write((const char*) &output[0], output.size());
-    // ofs.close();
+    std::vector<uint8_t> output = std::vector<uint8_t>(outbuffer, outbuffer + outlen);
+    std::ofstream ofs("output.jpg", std::ios_base::binary);
+    ofs.write((const char*) &output[0], output.size());
+    ofs.close();
 
     cv::waitKey(1);
 
